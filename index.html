@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>spark 分析器</title>
+<meta name="description" content="spark.lucko.me 取樣報告分析工具：卡頓診斷與 profiler 詳細檢視">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1000 1000'%3E%3Cpath fill='%23ffc93a' stroke='none' d='M150 1000C67.158081 1000 0 932.841919 0 850L0 150C0 67.158081 67.158081 0 150 0L850 0C932.841919 0 1000 67.158081 1000 150L1000 850C1000 932.841919 932.841919 1000 850 1000L150 1000ZM384.990234 829.855469C394.514343 829.809509 404.007629 826.42627 411.626953 819.818359L736.550781 535.509766C749.243103 524.340515 753.683838 506.445404 746.703125 490.580078C741.880005 474.841614 726.650269 464.306641 709.769531 464.306641L568.25 464.306641L665.853516 236.619141C673.34198 219.179932 667.758057 198.911194 652.400391 187.759766C637.042725 176.612122 616.100159 177.562195 601.757813 190.048828L276.873047 474.333984C264.135559 485.503235 259.644287 503.398346 265.595703 519.263672C271.547119 535.002075 286.696167 545.537109 302.472656 545.537109L445.134766 545.537109L347.517578 773.236328C340.041809 790.624756 345.627716 810.932373 360.972656 822.101563C368.159668 827.337158 376.586609 829.895996 384.990234 829.855469Z'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="app">
+
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000">
+          <path fill="#ffc93a" stroke="none" d="M150 1000C67.158081 1000 0 932.841919 0 850L0 150C0 67.158081 67.158081 0 150 0L850 0C932.841919 0 1000 67.158081 1000 150L1000 850C1000 932.841919 932.841919 1000 850 1000L150 1000ZM384.990234 829.855469C394.514343 829.809509 404.007629 826.42627 411.626953 819.818359L736.550781 535.509766C749.243103 524.340515 753.683838 506.445404 746.703125 490.580078C741.880005 474.841614 726.650269 464.306641 709.769531 464.306641L568.25 464.306641L665.853516 236.619141C673.34198 219.179932 667.758057 198.911194 652.400391 187.759766C637.042725 176.612122 616.100159 177.562195 601.757813 190.048828L276.873047 474.333984C264.135559 485.503235 259.644287 503.398346 265.595703 519.263672C271.547119 535.002075 286.696167 545.537109 302.472656 545.537109L445.134766 545.537109L347.517578 773.236328C340.041809 790.624756 345.627716 810.932373 360.972656 822.101563C368.159668 827.337158 376.586609 829.895996 384.990234 829.855469Z"/>
+        </svg>
+      </div>
+      <div>
+        <div class="brand-name">spark 分析器</div>
+        <div class="brand-sub">SamplerData 卡頓診斷</div>
+      </div>
+    </div>
+  </header>
+
+  <section class="input-row">
+    <div class="input-wrap">
+      <input id="report-input" class="text-input" type="text" spellcheck="false"
+             placeholder="貼上 spark.lucko.me 網址或報告 ID（例如 D6lqrEo2f3）">
+      <button id="analyze-btn" class="btn btn-primary" type="button">分析</button>
+    </div>
+    <label class="btn upload-btn" for="file-input">上傳 .sparkprofile</label>
+    <input id="file-input" type="file" accept=".sparkprofile,.bin,application/octet-stream" hidden>
+  </section>
+  <p class="input-hint">支援 spark.lucko.me / bytebin.lucko.me 網址、報告 ID、或本機 .sparkprofile 檔案上傳。資料只在瀏覽器內處理，不會上傳到任何伺服器。</p>
+
+  <main id="results">
+    <nav id="section-nav" class="section-nav" aria-label="報告段落導覽"></nav>
+    <div class="state" id="empty-state">
+      <div class="state-icon" aria-hidden="true"></div>
+      <div class="state-title">開始分析一份取樣報告</div>
+      <div class="state-desc">
+        在遊戲伺服器執行 <span class="chip">/spark profiler</span> 取得報告連結後貼上，或直接上傳
+        <span class="chip">.sparkprofile</span> 檔案。分析結果包含卡頓診斷、主要原因、實體分項與詳細 profiler 段落。
+      </div>
+    </div>
+  </main>
+
+  <footer class="footer">
+    <span>資料由 spark.lucko.me 取樣，分析引擎與 spark-analyze.py 一致</span>
+    <span class="mono">bytebin.lucko.me</span>
+  </footer>
+</div>
+
+<script src="js/protobuf.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/data.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
