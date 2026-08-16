@@ -187,7 +187,7 @@
     var meta = el("span", "node-meta");
     var b = el("b", null, F.pctStr(pct) + "%");
     meta.appendChild(b);
-    meta.appendChild(document.createTextNode(F.fmtF(selfMs, 0) + "ms"));
+    meta.appendChild(el("span", "node-ms", F.fmtF(selfMs, 0) + "ms"));
     row.appendChild(meta);
     var barWrap = el("div", "node-bar");
     var bar = el("div", "bar-track");
@@ -529,7 +529,7 @@
       stats.appendChild(s3);
       var s4 = el("div", "cause-stat");
       s4.appendChild(el("div", "cause-stat-label", "出現"));
-      s4.appendChild(el("div", "cause-stat-value", "跨 " + c.threadCount + " 執行緒"));
+      s4.appendChild(el("div", "cause-stat-value", c.threadCount > 1 ? "跨 " + c.threadCount + " 執行緒" : "1 執行緒"));
       stats.appendChild(s4);
       card.appendChild(stats);
 

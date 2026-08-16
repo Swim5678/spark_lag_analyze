@@ -718,7 +718,11 @@ button { font-family: inherit; }
 }
 
 .node-meta {
-  width: 84px;
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 7px;
+  width: 108px;
   flex: none;
   text-align: right;
   font-size: 12.5px;
@@ -727,6 +731,8 @@ button { font-family: inherit; }
 }
 
 .node-meta b { color: var(--text); }
+
+.node-ms { white-space: nowrap; }
 
 .node-bar { flex: 1; min-width: 60px; }
 
