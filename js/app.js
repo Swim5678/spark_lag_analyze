@@ -7,6 +7,23 @@
   var SparkEngine = root.SparkEngine;
   var F = SparkEngine.helpers;
 
+  /* 圖表字型與實例管理：ApexCharts 實例在重新渲染前必須 destroy，
+   * 否則舊實例的 timer / listener 會持續存在造成記憶體洩漏。 */
+  var FONT_STACK = '"Segoe UI", -apple-system, BlinkMacSystemFont, "PingFang TC", "Microsoft JhengHei", "Noto Sans TC", sans-serif';
+  var chartInstances = [];
+
+  function destroyCharts() {
+    for (var ci = 0; ci < chartInstances.length; ci++) {
+      try { chartInstances[ci].destroy(); } catch (e) { /* 忽略 */ }
+    }
+    chartInstances = [];
+  }
+
+  function registerChart(c) {
+    chartInstances.push(c);
+    return c;
+  }
+
   var resultsEl, inputEl, analyzeBtn, fileInput, emptyStateEl;
   var currentReport = null;
   // 報告快取：只留最近 REPORT_CACHE_MAX 筆（FIFO 淘汰），
@@ -35,6 +52,13 @@
     if (cls) e.className = cls;
     if (text !== undefined) e.textContent = text;
     return e;
+  }
+
+  /* 註記標籤：data-kind 對應 CSS 配色（排除/注意/判讀/結論/說明） */
+  function tag(label) {
+    var t = el("span", "tag", label);
+    t.dataset.kind = label;
+    return t;
   }
 
   function fmtPct(v, denom) {
@@ -550,13 +574,13 @@
     var list = el("div", "note-list");
     for (var i = 0; i < d.exclusions.length; i++) {
       var it = el("div", "note-item");
-      it.appendChild(el("span", "tag", "排除"));
+      it.appendChild(tag("排除"));
       it.appendChild(el("span", null, d.exclusions[i]));
       list.appendChild(it);
     }
     for (var j = 0; j < d.notes.length; j++) {
       var it2 = el("div", "note-item");
-      it2.appendChild(el("span", "tag", "注意"));
+      it2.appendChild(tag("注意"));
       it2.appendChild(el("span", null, d.notes[j]));
       list.appendChild(it2);
     }
@@ -641,7 +665,7 @@
 
     var concl = el("div", "note-item");
     concl.style.marginTop = "12px";
-    concl.appendChild(el("span", "tag", "結論"));
+    concl.appendChild(tag("結論"));
     var msg = "";
     if (totalPct >= 30) msg = "插件合計 " + F.fmtF(totalPct, 1) + "% tick CPU — 插件是主要負載來源，優先檢查下列插件。";
     else if (totalPct >= 15) msg = "插件合計 " + F.fmtF(totalPct, 1) + "% tick CPU — 插件負載顯著，值得優先檢查。";
@@ -731,7 +755,7 @@
     list.style.marginTop = "12px";
     for (var rd = 0; rd < reads.length; rd++) {
       var n = el("div", "note-item");
-      n.appendChild(el("span", "tag", "判讀"));
+      n.appendChild(tag("判讀"));
       n.appendChild(el("span", null, reads[rd]));
       list.appendChild(n);
     }
@@ -847,6 +871,20 @@
         bSplit.classList.remove("open");
         overWrap.classList.add("show");
         splitWrap.classList.remove("show");
+        var oc = overWrap.firstChild;
+        if (oc) {
+          var showOverlay = function () {
+            try {
+              if (oc.apexChart) {
+                oc.apexChart.resize();
+              } else if (oc.makeChart) {
+                oc.makeChart();
+              }
+            } catch (e) { /* 忽略 */ }
+          };
+          if (window.requestAnimationFrame) requestAnimationFrame(showOverlay);
+          else setTimeout(showOverlay, 0);
+        }
       });
     function msptRow(tag, rv) {
       if (!rv) return;
@@ -884,134 +922,47 @@
     var max = Math.max.apply(null, values);
     wrap.appendChild(el("div", "wc-range", "min " + F.fmtF(min, decimals || 0) + unit + " · max " + F.fmtF(max, decimals || 0) + unit));
     var body = el("div", "chart-body");
-    var svg = mkSvgPolyline(values, color);
-    body.appendChild(svg);
-    var dots = addDots(body, values, color);
+    var holder = el("div", "apex-spark");
+    body.appendChild(holder);
     wrap.appendChild(body);
-    attachTip(svg, function (xr) {
-      var i = idxAt(xr, values.length);
-      var mn = mins && mins[i] ? mins[i] : i + 1;
-      return [{ name: "第 " + mn + " 分鐘", val: F.fmtF(values[i], decimals || 0) + unit }];
-    }, function (xr) {
-      for (var k = 0; k < dots.length; k++) dots[k].classList.toggle("active", xr !== null && k === idxAt(xr, values.length));
-    });
     var axis = el("div", "wc-axis");
     axis.appendChild(el("span", null, "1"));
     axis.appendChild(el("span", null, values.length + " 分"));
     wrap.appendChild(axis);
+    if (typeof ApexCharts !== "undefined") {
+      var dc = decimals || 0, u = unit, mn = mins;
+      var opts = {
+        chart: {
+          type: "line",
+          height: 76,
+          sparkline: { enabled: true },
+          background: "transparent",
+          fontFamily: FONT_STACK,
+          foreColor: "#98a2b3",
+          toolbar: { show: false }
+        },
+        theme: { mode: "dark" },
+        colors: [color],
+        series: [{ name: label, data: values }],
+        stroke: { curve: "monotoneCubic", width: 2 },
+        dataLabels: { enabled: false },
+        grid: { show: false },
+        xaxis: { labels: { show: false } },
+        yaxis: { show: false },
+        tooltip: {
+          enabled: true,
+          custom: function (_o) {
+            var i = _o.dataPointIndex;
+            var mn2 = mn && mn[i] ? mn[i] : i + 1;
+            var v = values[i];
+            return '<div class="ov-tip"><div class="ov-tip-row"><span>第 ' + mn2 + ' 分鐘</span><b>' + F.fmtF(v, dc) + u + '</b></div></div>';
+          }
+        }
+      };
+      var chart = registerChart(new ApexCharts(holder, opts));
+      setTimeout(function () { chart.render().catch(function () {}); }, 0);
+    }
     return wrap;
-  }
-
-  function idxAt(xr, n) {
-    if (n === 1) return 0;
-    var W = 100, pad = 4;
-    var t = (xr * W - pad) / (W - 2 * pad);
-    var i = Math.round(t * (n - 1));
-    if (i < 0) i = 0;
-    if (i >= n) i = n - 1;
-    return i;
-  }
-
-  function addDots(body, values, color) {
-    var W = 100, H = 36, pad = 4;
-    var min = Math.min.apply(null, values);
-    var max = Math.max.apply(null, values);
-    var span = max - min || 1;
-    var dots = [];
-    for (var i = 0; i < values.length; i++) {
-      var px = pad + (values.length === 1 ? (W - 2 * pad) / 2 : (i * (W - 2 * pad)) / (values.length - 1));
-      var py = H - pad - ((values[i] - min) / span) * (H - 2 * pad);
-      var d = el("div", "chart-dot");
-      d.style.left = ((px / W) * 100).toFixed(2) + "%";
-      d.style.top = ((py / H) * 100).toFixed(2) + "%";
-      d.style.background = color;
-      body.appendChild(d);
-      dots.push(d);
-    }
-    return dots;
-  }
-
-  function attachTip(svg, getLines, onMove) {
-    var tip = el("div", "ov-tip");
-    var xline = el("div", "chart-xline");
-    svg.parentNode.appendChild(tip);
-    svg.parentNode.appendChild(xline);
-    svg.addEventListener("mousemove", function (e) {
-      var rect = svg.getBoundingClientRect();
-      if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) {
-        tip.style.display = "none";
-        xline.style.display = "none";
-        return;
-      }
-      var xr = (e.clientX - rect.left) / rect.width;
-      xline.style.display = "block";
-      xline.style.left = (xr * 100) + "%";
-      if (onMove) onMove(xr);
-      var lines = getLines(xr);
-      if (!lines.length) {
-        tip.style.display = "none";
-        return;
-      }
-      tip.textContent = "";
-      for (var k = 0; k < lines.length; k++) {
-        var rw = el("div", "ov-tip-row");
-        rw.appendChild(el("span", null, lines[k].name));
-        rw.appendChild(el("b", null, lines[k].val));
-        tip.appendChild(rw);
-      }
-      tip.style.display = "block";
-      var tw = tip.offsetWidth;
-      var th = tip.offsetHeight;
-      var tx = e.clientX + 16;
-      if (tx + tw > window.innerWidth - 8) tx = e.clientX - tw - 16;
-      var ty = e.clientY + 24;
-      if (ty + th > window.innerHeight - 8) ty = e.clientY - th - 12;
-      tip.style.left = Math.max(4, tx) + "px";
-      tip.style.top = Math.max(4, ty) + "px";
-    });
-    svg.addEventListener("mouseleave", function () {
-      tip.style.display = "none";
-      xline.style.display = "none";
-      if (onMove) onMove(null);
-    });
-  }
-
-  function mkSvgPolyline(values, color) {
-    var ns = "http://www.w3.org/2000/svg";
-    var svg = document.createElementNS(ns, "svg");
-    svg.setAttribute("viewBox", "0 0 100 36");
-    svg.setAttribute("preserveAspectRatio", "none");
-    var W = 100, H = 36, pad = 4;
-    var min = Math.min.apply(null, values);
-    var max = Math.max.apply(null, values);
-    var span = max - min || 1;
-    for (var g = 0; g < 3; g++) {
-      var y = pad + (g / 2) * (H - 2 * pad);
-      var ln = document.createElementNS(ns, "line");
-      ln.setAttribute("x1", String(pad));
-      ln.setAttribute("x2", String(W - pad));
-      ln.setAttribute("y1", String(y));
-      ln.setAttribute("y2", String(y));
-      ln.setAttribute("stroke", "rgba(255,255,255,0.07)");
-      ln.setAttribute("stroke-width", "1");
-      ln.setAttribute("vector-effect", "non-scaling-stroke");
-      svg.appendChild(ln);
-    }
-    var pts = values.map(function (v, i) {
-      var x = pad + (values.length === 1 ? (W - 2 * pad) / 2 : (i * (W - 2 * pad)) / (values.length - 1));
-      var y = H - pad - ((v - min) / span) * (H - 2 * pad);
-      return x.toFixed(2) + "," + y.toFixed(2);
-    }).join(" ");
-    var pl = document.createElementNS(ns, "polyline");
-    pl.setAttribute("points", pts);
-    pl.setAttribute("fill", "none");
-    pl.setAttribute("stroke", color);
-    pl.setAttribute("stroke-width", "2");
-    pl.setAttribute("stroke-linejoin", "round");
-    pl.setAttribute("stroke-linecap", "round");
-    pl.setAttribute("vector-effect", "non-scaling-stroke");
-    svg.appendChild(pl);
-    return svg;
   }
 
   function winDelta(i, prev, cur, invert) {
@@ -1024,7 +975,6 @@
   }
 
   function overlayChart(datasets, minsAll) {
-    var ns = "http://www.w3.org/2000/svg";
     var wrap = el("div", "win-chart ov-chart");
     var bar = el("div", "ov-bar");
     var reset = el("button", "vt-btn", "重設縮放");
@@ -1032,254 +982,94 @@
     bar.appendChild(reset);
     wrap.appendChild(bar);
     var body = el("div", "chart-body ov-body");
-    var svg = document.createElementNS(ns, "svg");
-    svg.setAttribute("viewBox", "0 0 100 36");
-    svg.setAttribute("preserveAspectRatio", "none");
-    var xline = el("div", "chart-xline");
-    var brushEl = el("div", "ov-brush");
-    body.appendChild(svg);
-    body.appendChild(xline);
-    body.appendChild(brushEl);
-    var yL = el("div", "ov-yaxis ov-left");
-    var yR = el("div", "ov-yaxis ov-right");
-    body.appendChild(yL);
-    body.appendChild(yR);
+    var holder = el("div", "apex-overlay");
+    body.appendChild(holder);
     wrap.appendChild(body);
-    var xAxis = el("div", "ov-xaxis");
-    wrap.appendChild(xAxis);
-    var legend = el("div", "ov-legend");
-    wrap.appendChild(legend);
-    var W = 100, H = 36, pad = 4;
-    var n = datasets.length ? datasets[0].values.length : 0;
-    var keys = [];
-    var range = [0, n - 1];
-    for (var di = 0; di < datasets.length; di++) {
-      keys.push(di);
-      var vals = datasets[di].values.filter(function (v) { return v !== null; });
-      var mx = Math.max.apply(null, vals);
-      if (datasets[di].label === "TPS") mx = Math.max(mx, 20);
-      else if (datasets[di].label === "MSPT") mx = Math.ceil(mx / 10) * 10;
-      else mx = Math.ceil(mx / (mx > 1000 ? 1000 : mx > 100 ? 100 : 10)) * (mx > 1000 ? 1000 : mx > 100 ? 100 : 10);
-      datasets[di].maxi = mx;
+    var categories = [];
+    for (var ci = 0; ci < minsAll.length; ci++) {
+      categories.push(minsAll[ci] !== null && minsAll[ci] !== undefined ? "第 " + minsAll[ci] + " 分" : String(ci + 1));
     }
-    function visibleLen() { return range[1] - range[0] + 1; }
-    function draw() {
-      while (svg.firstChild) svg.removeChild(svg.firstChild);
-      yL.textContent = "";
-      yR.textContent = "";
-      for (var g = 0; g < 3; g++) {
-        var gy = pad + (g / 2) * (H - 2 * pad);
-        var ln = document.createElementNS(ns, "line");
-        ln.setAttribute("x1", String(pad));
-        ln.setAttribute("x2", String(W - pad));
-        ln.setAttribute("y1", String(gy));
-        ln.setAttribute("y2", String(gy));
-        ln.setAttribute("stroke", "rgba(255,255,255,0.07)");
-        ln.setAttribute("stroke-width", "1");
-        ln.setAttribute("vector-effect", "non-scaling-stroke");
-        svg.appendChild(ln);
-      }
-      var len = visibleLen();
-      var yTicks = [0, 0.25, 0.5, 0.75, 1];
-      function axisTicks(axis, ds) {
-        for (var t = 0; t < yTicks.length; t++) {
-          var sp = el("span", null, F.fmtF(yTicks[t] * ds.maxi, 0));
-          axis.appendChild(sp);
-        }
-      }
-      for (var ki = 0; ki < keys.length; ki++) {
-        var ds = datasets[keys[ki]];
-        var segs = [];
-        var cur = null;
-        for (var j = 0; j < len; j++) {
-          var v = ds.values[range[0] + j];
-          if (v === null || v === undefined) { if (cur) { segs.push(cur); cur = null; } continue; }
-          if (!cur) cur = [];
-          cur.push(j);
-        }
-        if (cur) segs.push(cur);
-        for (var si = 0; si < segs.length; si++) {
-          var seg = segs[si];
-          var pts = seg.map(function (jj) {
-            var v = ds.values[range[0] + jj];
-            var x = pad + (len === 1 ? (W - 2 * pad) / 2 : (jj * (W - 2 * pad)) / (len - 1));
-            var yv = Math.min(v, ds.maxi);
-            var y = H - pad - (yv / ds.maxi) * (H - 2 * pad);
-            return x.toFixed(2) + "," + y.toFixed(2);
-          }).join(" ");
-          var pl = document.createElementNS(ns, "polyline");
-          pl.setAttribute("points", pts);
-          pl.setAttribute("fill", "none");
-          pl.setAttribute("stroke", ds.color);
-          pl.setAttribute("stroke-width", "4");
-          pl.setAttribute("stroke-linejoin", "round");
-          pl.setAttribute("stroke-linecap", "round");
-          pl.setAttribute("vector-effect", "non-scaling-stroke");
-          svg.appendChild(pl);
-        }
-      }
-      if (keys.length) {
-        var leftDs = datasets[keys[0]];
-        var rightDs = datasets[keys[keys.length - 1]];
-        axisTicks(yL, leftDs);
-        axisTicks(yR, rightDs);
-        var ylabL = el("span", "ov-ylab", leftDs.label);
-        ylabL.style.color = leftDs.color;
-        yL.appendChild(ylabL);
-        var ylabR = el("span", "ov-ylab", rightDs.label);
-        ylabR.style.color = rightDs.color;
-        yR.appendChild(ylabR);
-      }
-      xAxis.textContent = "";
-      var step = Math.max(1, Math.round(len / 6));
-      for (var xi = 0; xi < len; xi += step) {
-        if (xi > 0 && len - 1 - xi > 0 && xi + step >= len) continue;
-        var winIdx = range[0] + xi;
-        var lbl;
-        if (minsAll[winIdx] !== null && minsAll[winIdx] !== undefined) {
-          lbl = "第 " + minsAll[winIdx] + " 分";
-        } else {
-          lbl = String(winIdx + 1);
-        }
-        var xs = el("span", null, lbl);
-        xAxis.appendChild(xs);
-      }
-      var lastLbl;
-      if (minsAll[range[1]] !== null && minsAll[range[1]] !== undefined) {
-        lastLbl = "第 " + minsAll[range[1]] + " 分";
-      } else {
-        lastLbl = String(range[1] + 1);
-      }
-      xAxis.appendChild(el("span", null, lastLbl));
+    var series = [];
+    var unitBySeries = [];
+    for (var si = 0; si < datasets.length; si++) {
+      series.push({ name: datasets[si].label, data: datasets[si].values });
+      unitBySeries.push({ unit: datasets[si].unit, dec: datasets[si].decimals || 0 });
     }
-    function winIdxAt(xr) {
-      if (n === 1) return range[0];
-      var t = (xr * W - pad) / (W - 2 * pad);
-      var j = Math.round(t * (visibleLen() - 1));
-      if (j < 0) j = 0;
-      if (j >= visibleLen()) j = visibleLen() - 1;
-      return range[0] + j;
+    var colors = datasets.map(function (dd) { return dd.color; });
+    // ApexCharts v6 需要每個 series 都有對應的 yaxis，否則多於兩條
+    // series 時 setSeriesYAxisMappings 會對未定義的軸呼叫 push。
+    var yaxis = [];
+    for (var yi = 0; yi < datasets.length; yi++) {
+      var isLastAxis = datasets.length > 1 && yi === datasets.length - 1;
+      yaxis.push({
+        seriesName: datasets[yi].label,
+        opposite: isLastAxis,
+        show: yi === 0 || isLastAxis,
+        labels: {
+          show: yi === 0 || isLastAxis,
+          formatter: function (v) { return F.fmtF(v, 0); }
+        },
+        axisBorder: { show: yi === 0 || isLastAxis },
+        axisTicks: { show: yi === 0 || isLastAxis }
+      });
     }
-    var dotSets = [];
-    function rebuildDots() {
-      var bd = body.querySelectorAll(".chart-dot");
-      for (var q = 0; q < bd.length; q++) bd[q].parentNode.removeChild(bd[q]);
-      dotSets = [];
-      var len = visibleLen();
-      for (var di2 = 0; di2 < datasets.length; di2++) {
-        var ds2 = datasets[di2];
-        var arr = [];
-        for (var j2 = 0; j2 < len; j2++) {
-          var v2 = ds2.values[range[0] + j2];
-          if (v2 === null || v2 === undefined) continue;
-          var x2 = pad + (len === 1 ? (W - 2 * pad) / 2 : (j2 * (W - 2 * pad)) / (len - 1));
-          var y2 = H - pad - (Math.min(v2, ds2.maxi) / ds2.maxi) * (H - 2 * pad);
-          var d2 = el("div", "chart-dot");
-          d2.style.left = ((x2 / W) * 100).toFixed(2) + "%";
-          d2.style.top = ((y2 / H) * 100).toFixed(2) + "%";
-          d2.style.background = ds2.color;
-          body.appendChild(d2);
-          arr.push(d2);
-        }
-        dotSets.push(arr);
-      }
-    }
-    function redraw() { draw(); rebuildDots(); }
-    var dragging = false, dragStart = null, dragCur = null;
-    svg.addEventListener("mousedown", function (e) {
-      dragging = true;
-      dragStart = e.clientX;
-      dragCur = e.clientX;
-      brushEl.style.display = "block";
-      brushEl.style.left = "0%";
-      brushEl.style.width = "0%";
-      e.preventDefault();
-    });
-    document.addEventListener("mousemove", function (e) {
-      if (!dragging) return;
-      dragCur = e.clientX;
-      var rect = svg.getBoundingClientRect();
-      var x1 = Math.min(dragStart, dragCur);
-      var x2 = Math.max(dragStart, dragCur);
-      var l = Math.max(0, (x1 - rect.left) / rect.width);
-      var r = Math.min(1, (x2 - rect.left) / rect.width);
-      brushEl.style.left = (l * 100) + "%";
-      brushEl.style.width = ((r - l) * 100) + "%";
-    });
-    document.addEventListener("mouseup", function () {
-      if (!dragging) return;
-      dragging = false;
-      brushEl.style.display = "none";
-      var rect = svg.getBoundingClientRect();
-      var x1 = Math.min(dragStart, dragCur);
-      var x2 = Math.max(dragStart, dragCur);
-      var l = Math.max(0, (x1 - rect.left) / rect.width);
-      var r = Math.min(1, (x2 - rect.left) / rect.width);
-      if (r - l >= (n - 1) / n * 0.98 || r - l >= 0.98) {
-        range = [0, n - 1];
-      } else if (r - l >= 0.03) {
-        var a = Math.round(l * (n - 1));
-        var b = Math.round(r * (n - 1));
-        if (a < 0) a = 0;
-        if (b > n - 1) b = n - 1;
-        if (b > a) range = [a, b];
-      }
-      redraw();
-    });
-    attachTip(svg, function (xr) {
-      var out = [];
-      var wi = winIdxAt(xr);
-      for (var k = 0; k < keys.length; k++) {
-        var ds = datasets[keys[k]];
-        var v = ds.values[wi];
-        if (v === null || v === undefined) continue;
-        var mn = minsAll[wi] !== null && minsAll[wi] !== undefined ? minsAll[wi] : wi + 1;
-        out.push({ name: ds.label + " 第 " + mn + " 分鐘", val: F.fmtF(v, ds.decimals || 0) + ds.unit });
-      }
-      return out;
-    }, function (xr) {
-      for (var k = 0; k < dotSets.length; k++) {
-        var jx = -1;
-        if (xr !== null) {
-          var wi2 = winIdxAt(xr);
-          var len2 = visibleLen();
-          for (var j3 = 0; j3 < len2; j3++) {
-            if (range[0] + j3 === wi2 && datasets[k].values[range[0] + j3] !== null) { jx = j3; break; }
+    if (typeof ApexCharts !== "undefined") {
+      var opts = {
+        chart: {
+          type: "line",
+          height: 270,
+          background: "transparent",
+          fontFamily: FONT_STACK,
+          foreColor: "#98a2b3",
+          toolbar: {
+            show: true,
+            tools: {
+              download: false,
+              selection: false,
+              zoom: true,
+              zoomin: true,
+              zoomout: true,
+              pan: true,
+              reset: false
+            }
+          },
+          zoom: { enabled: true, type: "x" }
+        },
+        theme: { mode: "dark" },
+        colors: colors,
+        series: series,
+        dataLabels: { enabled: false },
+        stroke: { curve: "monotoneCubic", width: 2 },
+        grid: { borderColor: "rgba(255,255,255,0.07)" },
+        legend: { show: true, position: "bottom", horizontalAlign: "left" },
+        xaxis: { categories: categories },
+        yaxis: yaxis,
+        tooltip: {
+          shared: true,
+          intersect: false,
+          y: {
+            formatter: function (val, o) {
+              var su = unitBySeries[o.seriesIndex];
+              if (!su) return "";
+              return val === null || val === undefined ? "-" : F.fmtF(val, su.dec) + su.unit;
+            }
           }
         }
-        for (var j4 = 0; j4 < dotSets[k].length; j4++) dotSets[k][j4].classList.toggle("active", j4 === jx);
-      }
-    });
-    reset.addEventListener("click", function () { range = [0, n - 1]; redraw(); });
-    legend.textContent = "";
-    for (var li = 0; li < datasets.length; li++) {
-      (function (idx) {
-        var ds = datasets[idx];
-        var b = el("button", "legend-btn toggled");
-        b.style.color = ds.color;
-        b.appendChild(el("span", null, ds.label));
-        var lastV = null;
-        for (var lj = ds.values.length - 1; lj >= 0; lj--) {
-          if (ds.values[lj] !== null) { lastV = ds.values[lj]; break; }
-        }
-        var vb = el("b", "ov-val", F.fmtF(lastV, ds.decimals || 0) + ds.unit);
-        var d = winDelta(0, null, lastV, ds.invert);
-        b.appendChild(vb);
-        b.addEventListener("click", function () {
-          var pos = keys.indexOf(idx);
-          if (pos >= 0) {
-            keys.splice(pos, 1);
-            b.classList.remove("toggled");
-          } else {
-            keys.push(idx);
-            b.classList.add("toggled");
-          }
-          redraw();
-        });
-        legend.appendChild(b);
-      })(li);
+      };
+      wrap.makeChart = function () {
+        if (wrap.apexChart) return wrap.apexChart;
+        var chart = registerChart(new ApexCharts(holder, opts));
+        wrap.apexChart = chart;
+        chart.render().catch(function () {});
+        return chart;
+      };
+      reset.addEventListener("click", function () {
+        var c = wrap.makeChart();
+        c.resetSeries();
+      });
+    } else {
+      reset.style.display = "none";
     }
-    redraw();
     return wrap;
   }
 
@@ -1395,7 +1185,7 @@
     ];
     for (var i = 0; i < notes.length; i++) {
       var n = el("div", "note-item");
-      n.appendChild(el("span", "tag", "說明"));
+      n.appendChild(tag("說明"));
       n.appendChild(el("span", null, notes[i]));
       note.appendChild(n);
     }
@@ -1606,12 +1396,16 @@
   var navEl = null;
   var navHandler = null;
 
+  function closeSidebar() {
+    document.body.classList.remove("sidebar-open");
+  }
+
   function setupNav() {
     if (!navEl) {
-      navEl = el("nav", "section-nav");
-    } else {
-      navEl.innerHTML = "";
+      navEl = document.getElementById("section-nav");
+      if (!navEl) return;
     }
+    navEl.innerHTML = "";
     var targets = [];
     var secIds = ["sec-overview", "sec-causes", "sec-plugins", "sec-threads", "sec-env"];
     var labels = ["總覽", "根因", "插件", "執行緒", "環境"];
@@ -1619,35 +1413,30 @@
       var s = document.getElementById(secIds[i]);
       if (s) targets.push([s, labels[i]]);
     }
-    if (!targets.length) {
-      navEl.classList.remove("show");
-      return;
-    }
-    var pills = [];
+    if (!targets.length) return;
+    var items = [];
     for (var q = 0; q < targets.length; q++) {
       (function (idx) {
-        var p = el("button", "nav-pill", targets[idx][1]);
+        var p = el("button", "menu-item", targets[idx][1]);
         p.type = "button";
         p.addEventListener("click", function () {
-          var top = targets[idx][0].offsetTop - 70;
+          var top = targets[idx][0].offsetTop - 72;
           window.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+          closeSidebar();
         });
-        pills.push(p);
+        items.push(p);
         navEl.appendChild(p);
       })(q);
     }
-    navEl.classList.add("show");
-    if (resultsEl.firstChild !== navEl) {
-      resultsEl.insertBefore(navEl, resultsEl.firstChild);
-    }
     var onScroll = function () {
-      var y = window.scrollY + 80;
+      var y = window.scrollY + 84;
       var cur = -1;
       for (var k = 0; k < targets.length; k++) {
         if (targets[k][0].offsetTop <= y) cur = k;
       }
-      for (var m = 0; m < pills.length; m++) {
-        pills[m].classList.toggle("active", m === cur);
+      if (cur < 0 && window.scrollY < 8) cur = 0;
+      for (var m = 0; m < items.length; m++) {
+        items[m].classList.toggle("active", m === cur);
       }
     };
     if (navHandler) window.removeEventListener("scroll", navHandler);
@@ -1657,12 +1446,13 @@
   }
 
   function renderReport(report) {
+    destroyCharts();
     resultsEl.innerHTML = "";
     currentReport = report;
     var d = report.diag;
     if (report.allocation) {
       var note = el("div", "note-item");
-      note.appendChild(el("span", "tag", "注意"));
+      note.appendChild(tag("注意"));
       note.appendChild(el("span", null, "ALLOCATION 模式（times 為配置位元組數，時間語意不適用，診斷略過）"));
       resultsEl.appendChild(note);
       var dts = renderDetail(report);
@@ -1729,6 +1519,20 @@
     analyzeBtn = document.getElementById("analyze-btn");
     fileInput = document.getElementById("file-input");
     emptyStateEl = document.getElementById("empty-state");
+
+    var navToggle = document.getElementById("nav-toggle");
+    if (navToggle) {
+      navToggle.addEventListener("click", function () {
+        document.body.classList.toggle("sidebar-open");
+      });
+    }
+    var backdrop = document.getElementById("sidebar-backdrop");
+    if (backdrop) {
+      backdrop.addEventListener("click", closeSidebar);
+    }
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") closeSidebar();
+    });
 
     var go = function () { runAnalysis(inputEl.value); };
     analyzeBtn.addEventListener("click", go);
