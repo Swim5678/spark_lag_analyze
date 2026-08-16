@@ -175,12 +175,15 @@
   // 噪音判定（熱點排除清單）
   // ----------------------------------------------------------------------
 
+  /* 快取 (cls, mth) 噪音判定：上限 20 萬筆，超過直接清空重來
+   * （防止動態產生類別名導致 key 空間失控）。 */
   var _noiseCache = new Map();
   var _noiseIncCache = new Map();
 
   function isNoise(cls, mth) {
     var ck = cls + "\u0000" + mth;
     if (_noiseCache.has(ck)) return _noiseCache.get(ck);
+    if (_noiseCache.size > 200000) _noiseCache.clear();
     var r;
     var full = cls + "." + mth;
     if (full.indexOf("Thread.run") !== -1 || full.indexOf("TickThreadRunner.run") !== -1) {
@@ -222,6 +225,7 @@
   function isNoiseInc(cls, mth) {
     var ck = cls + "\u0000" + mth;
     if (_noiseIncCache.has(ck)) return _noiseIncCache.get(ck);
+    if (_noiseIncCache.size > 200000) _noiseIncCache.clear();
     var r;
     if (isNoise(cls, mth)) {
       r = true;
@@ -285,7 +289,8 @@
       kids = children[i];
       for (j = 0; j < kids.length; j++) {
         k = kids[j];
-        if (k >= 0 && k < n) selfT[i] -= totals[k];
+        // 防禦：只扣「以自己為父」的子節點，避免重複引用被多次扣減
+        if (k >= 0 && k < n && parent[k] === i) selfT[i] -= totals[k];
       }
     }
     var out = new Array(n);
@@ -356,8 +361,15 @@
       return false;
     }
 
+    // 橋接表：類別名不含 Chunk/Entity 字樣、但方法名代表實體/區塊系統
+    // 入口的 Minecraft 類別（如 ServerLevel.tickChunk），補上方法名判斷才
+    // 歸入 ENTITY/CHUNK，避免被誤分類為 VANILLA。
+    var ENTITY_BRIDGE = ["guardEntityTick", "tickEntities", "serverTickEntities"];
+    var CHUNK_BRIDGE = ["tickChunk", "tickChunks", "chunkTick", "tickChunkMap"];
+
     function categorize(cls, mth) {
-      if (catCache.has(cls)) return catCache.get(cls);
+      var ck = cls + "\u0000" + mth;
+      if (catCache.has(ck)) return catCache.get(ck);
       var r;
       if (cls.indexOf("io.hari.") === 0) {
         r = ["HARI", "io.hari.*"];
@@ -370,6 +382,10 @@
       } else if (startsWithAny(cls, CORE_PREFIXES) &&
         (cls.indexOf("Chunk") !== -1 || cls.indexOf("Entity") !== -1 || cls.indexOf("net.minecraft.world.entity.") === 0)) {
         r = [cls.indexOf("Chunk") !== -1 ? "CHUNK" : "ENTITY", cls];
+      } else if (startsWithAny(cls, CORE_PREFIXES) && ENTITY_BRIDGE.indexOf(mth) !== -1) {
+        r = ["ENTITY", cls];
+      } else if (startsWithAny(cls, CORE_PREFIXES) && CHUNK_BRIDGE.indexOf(mth) !== -1) {
+        r = ["CHUNK", cls];
       } else if (["netty", "PacketEncoder", "PacketDecoder", "PacketListener", "PacketUtils"].some(function (s) { return cls.indexOf(s) !== -1; })) {
         r = ["NETWORK", cls];
       } else if (["RegionFile", "FileChannel", "FileOutputStream", "FileInputStream",
@@ -383,7 +399,7 @@
       } else {
         r = ["UNKNOWN", cls];
       }
-      catCache.set(cls, r);
+      catCache.set(ck, r);
       return r;
     }
 
@@ -417,7 +433,7 @@
   // 中間資料結構：執行緒彙總
   // ----------------------------------------------------------------------
 
-  function collectThreads(root) {
+  function collectThreads(root, exemptSet) {
     var threads = [];
     var tnodes = allOf(root, 2);
     for (var i = 0; i < tnodes.length; i++) {
@@ -428,6 +444,7 @@
       var agg = new Map();
       var aggInc = new Map();
       var grand = 0;
+      var javaSum = new Map();
       for (var j = 0; j < nodes.length; j++) {
         var cls = nodes[j][0];
         var mth = nodes[j][1];
@@ -435,6 +452,10 @@
         var stv = nodes[j][3];
         var itv = nodes[j][4];
         grand += stv;
+        if (cls.indexOf("java.") === 0) {
+          var jk = cls + "\u0000" + mth;
+          javaSum.set(jk, (javaSum.get(jk) || 0) + stv);
+        }
         var key = keyOf(cls, mth, line);
         agg.set(key, (agg.get(key) || 0) + stv);
         aggInc.set(key, (aggInc.get(key) || 0) + itv);
@@ -468,8 +489,18 @@
         var k = entry[0];
         var t = entry[1];
         var parts = splitKey(k);
-        if (isNoise(parts[0], parts[1])) {
-          excluded.set(k, t);
+        var pc = parts[0];
+        var pm = parts[1];
+        // java.* 高佔比豁免：某 java 方法自身時間佔該執行緒 ≥10% 時視為
+        // 顯著原因（非噪音），納入全域豁免集合，供診斷/鏈/含子榜共用，
+        // 確保各處對同一方法的處理一致。
+        if (isNoise(pc, pm)) {
+          if (pc.indexOf("java.") === 0 && (javaSum.get(pc + "\u0000" + pm) || 0) >= grand * 0.1) {
+            exemptSet.add(pc + "\u0000" + pm);
+            work.set(k, t);
+          } else {
+            excluded.set(k, t);
+          }
         } else {
           work.set(k, t);
         }
@@ -510,7 +541,7 @@
       var wEnt = vi(get(wi, 8), null);
       var wCh = vi(get(wi, 10), null);
       var wDur = vi(get(wi, 13), null);
-      if (wTps === null && wEnt === null && wCh === null) continue;
+      if (wTps === null && wEnt === null && wCh === null && wMspt === null) continue;
       wins.push({
         dur_s: wDur ? wDur / 1000 : null,
         startMs: asDouble(get(wi, 11)),
@@ -555,6 +586,7 @@
 
   function confidence(selfPct, overrun) {
     if (selfPct >= 15 && overrun !== null && overrun > 0) return "HIGH";
+    if (overrun === null && selfPct >= 20) return "HIGH";
     if (selfPct >= 8) return "MEDIUM";
     return "LOW";
   }
@@ -569,7 +601,8 @@
 
   function tickFactor(durationMs, tpsAvg, target) {
     if (!durationMs || durationMs <= 0) return null;
-    var tps = Math.min(tpsAvg || target, target);
+    // tpsAvg=0（完全凍結）時不誤用 target：回傳 null（無法估算每 tick 成本）
+    var tps = (tpsAvg === null || tpsAvg === undefined) ? target : Math.min(tpsAvg, target);
     if (tps <= 0) return null;
     var secs = durationMs / 1000;
     if (secs <= 0) return null;
@@ -843,7 +876,7 @@
     return causes;
   }
 
-  function findChainIndex(threads, categorize) {
+  function findChainIndex(threads, categorize, exemptSet) {
     var index = new Map();
     for (var ti = 0; ti < threads.length; ti++) {
       var t = threads[ti];
@@ -853,7 +886,7 @@
         var mth = node[1];
         var line = node[2];
         var stv = node[3];
-        if (isNoise(cls, mth)) continue;
+        if (isNoise(cls, mth) && !exemptSet.has(cls + "\u0000" + mth)) continue;
         var catRes = categorize(cls, mth);
         var best = index.get(catRes[0]);
         if (!best) {
@@ -868,7 +901,7 @@
     return index;
   }
 
-  function chainsFromIndex(best, threads, limit) {
+  function chainsFromIndex(best, threads, limit, exemptSet) {
     var chains = [];
     if (!best) return chains;
     for (var bp of best.entries()) {
@@ -885,7 +918,7 @@
         idx = n2[5];
       }
       chain.reverse();
-      var visible = chain.filter(function (x) { return !isNoiseInc(x[0], x[1]); });
+      var visible = chain.filter(function (x) { return !isNoiseInc(x[0], x[1]) || exemptSet.has(x[0] + "\u0000" + x[1]); });
       if (!visible.length) visible = chain.slice(-1);
       chains.push([stv2, key, visible]);
     }
@@ -993,7 +1026,10 @@
       var categorize = cats.categorize;
 
       // ---- 中間資料結構 ----
-      threads = collectThreads(root);
+      // 全域 java.* 高佔比豁免集合：collectThreads 分流時填入（該執行緒某
+      // java 方法自身 ≥10%），診斷/呼叫鏈/含子榜共用，保證各處結論一致。
+      var exemptSet = new Set();
+      threads = collectThreads(root, exemptSet);
       wins = parseWindows(root);
 
       pmem = safeParse(get(pstats, 1));
@@ -1034,8 +1070,8 @@
           env: env,
           tpsMspt: tpsInfo,
           world: worldInfo,
-          threads: threadDetail(threads, durMs, pluginOf),
-          serverAgg: serverAgg(threads, pluginOf),
+          threads: threadDetail(threads, durMs, pluginOf, exemptSet),
+          serverAgg: serverAgg(threads, pluginOf, exemptSet),
           hari: hari(threads),
           diag: null,
         };
@@ -1064,11 +1100,11 @@
       var catTick = aggregateByCategory(tickThreads, categorize);
       var causes = rankCauses(catTick, tickActive, factor, overrun);
       var chains = new Map();
-      var chainIndex = findChainIndex(tickThreads, categorize);
+      var chainIndex = findChainIndex(tickThreads, categorize, exemptSet);
       for (var ci = 0; ci < causes.length; ci++) {
         var cc = causes[ci];
         if (cc.selfPct >= 3) {
-          chains.set(cc.category, chainsFromIndex(chainIndex.get(cc.category), tickThreads, 3));
+          chains.set(cc.category, chainsFromIndex(chainIndex.get(cc.category), tickThreads, 3, exemptSet));
         }
       }
       var plugins = aggregateByPlugin(tickThreads, categorize);
@@ -1174,8 +1210,8 @@
         env: env,
         tpsMspt: tpsInfo,
         world: worldInfo,
-        threads: threadDetail(threads, durMs, pluginOf),
-        serverAgg: serverAgg(threads, pluginOf),
+        threads: threadDetail(threads, durMs, pluginOf, exemptSet),
+        serverAgg: serverAgg(threads, pluginOf, exemptSet),
         hari: hari(threads),
         diag: diag,
       };
@@ -1271,7 +1307,7 @@
   // 詳細層資料
   // ----------------------------------------------------------------------
 
-  function threadDetail(threads, durMs, pluginOf) {
+  function threadDetail(threads, durMs, pluginOf, exemptSet) {
     var out = [];
     for (var i = 0; i < threads.length; i++) {
       var t = threads[i];
@@ -1319,7 +1355,8 @@
       for (var e of t.work.entries()) {
         var k = e[0];
         var parts = splitKey(k);
-        if (!isNoiseInc(parts[0], parts[1]) && (t.aggInc.get(k) || 0) >= incTh) {
+        var ck = parts[0] + "\u0000" + parts[1];
+        if ((!isNoiseInc(parts[0], parts[1]) || exemptSet.has(ck)) && (t.aggInc.get(k) || 0) >= incTh) {
           incList.push([k, t.aggInc.get(k), t.work.get(k)]);
         }
       }
@@ -1334,7 +1371,7 @@
     return out;
   }
 
-  function serverAgg(threads, pluginOf) {
+  function serverAgg(threads, pluginOf, exemptSet) {
     if (threads.length <= 1) return null;
     var aggAll = new Map();
     var aggIncAll = new Map();
@@ -1355,7 +1392,7 @@
     var excludedAll = new Map();
     for (var e2 of aggAll.entries()) {
       var parts = splitKey(e2[0]);
-      if (isNoise(parts[0], parts[1])) {
+      if (isNoise(parts[0], parts[1]) && !exemptSet.has(parts[0] + "\u0000" + parts[1])) {
         excludedAll.set(e2[0], e2[1]);
       } else {
         workAll.set(e2[0], e2[1]);
@@ -1382,7 +1419,7 @@
     for (var e3 of workAll.entries()) {
       var k = e3[0];
       var parts = splitKey(k);
-      if (!isNoiseInc(parts[0], parts[1]) && (aggIncAll.get(k) || 0) >= incAllTh) {
+      if ((!isNoiseInc(parts[0], parts[1]) || exemptSet.has(parts[0] + "\u0000" + parts[1])) && (aggIncAll.get(k) || 0) >= incAllTh) {
         incAllList.push([k, aggIncAll.get(k), workAll.get(k)]);
       }
     }

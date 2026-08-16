@@ -9,7 +9,22 @@
 
   var resultsEl, inputEl, analyzeBtn, fileInput, emptyStateEl;
   var currentReport = null;
+  // 報告快取：只留最近 REPORT_CACHE_MAX 筆（FIFO 淘汰），
+  // 避免長期使用下記憶體持續累積（每筆含完整 report 與節點陣列）。
   var reportCache = {};
+  var reportOrder = [];
+  var REPORT_CACHE_MAX = 3;
+
+  function cacheReport(url, report) {
+    var i2 = reportOrder.indexOf(url);
+    if (i2 !== -1) reportOrder.splice(i2, 1);
+    reportCache[url] = report;
+    reportOrder.push(url);
+    while (reportOrder.length > REPORT_CACHE_MAX) {
+      var old = reportOrder.shift();
+      delete reportCache[old];
+    }
+  }
 
   function reportPluginOf(cls) {
     return currentReport && currentReport._pluginOf ? currentReport._pluginOf(cls) : null;
@@ -1697,7 +1712,7 @@
       renderReport(res.report);
       if (id) {
         var url = "?id=" + id;
-        reportCache[url] = res.report;
+        cacheReport(url, res.report);
         try { history.pushState({ url: url }, "", url); } catch (e) { /* ignore */ }
         document.title = "spark 分析器 — " + id;
       }
