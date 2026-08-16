@@ -335,12 +335,13 @@
       aiTop.sort(function (a, b) { return b[1] - a[1]; });
       groups.push({ label: "AI 開銷的實體入口", rows: aiTop });
     }
-    wrap.appendChild(el("div", "ebar-total", "實體 self 總計 " + F.fmtF(total, 0) + "ms"));
+    wrap.appendChild(el("div", "ebar-total", "實體自身總計 " + F.fmtF(total, 0) + "ms"));
     var list = el("div", "ebar-list");
     var MAX_ROW = 20;
     function appendGroup(labelText, items) {
       var head = el("button", "collapse-btn ebar-label", null);
       head.type = "button";
+      head.classList.add("open");
       head.appendChild(el("span", "collapse-arrow", "▶"));
       head.appendChild(document.createTextNode(labelText));
       list.appendChild(head);
@@ -405,7 +406,7 @@
     btn.type = "button";
     var arrow = el("span", "collapse-arrow", "▶");
     btn.appendChild(arrow);
-    btn.appendChild(document.createTextNode("Call Chain（self 最高的節點往上追，最內層路徑）"));
+    btn.appendChild(document.createTextNode("Call Chain（自身最高的節點往上追，最內層路徑）"));
     var body = el("div", "collapse-body");
     for (var ci = 0; ci < ch.length; ci++) {
       var nodes = ch[ci][2];
@@ -418,7 +419,7 @@
         if (cn[2]) s += ":" + cn[2];
         line.appendChild(document.createTextNode(s));
         if (j === shown.length - 1) {
-          var mark = el("span", "mark", "   ← self 最高");
+          var mark = el("span", "mark", "   ← 自身最高");
           line.appendChild(mark);
         }
         chain.appendChild(line);
@@ -437,7 +438,7 @@
   function renderCauses(d) {
     var sec = el("section", "section");
     sec.id = "sec-causes";
-    sec.appendChild(sectionHead("主要原因", "self 佔非 idle tick 採樣 ≥3% 的類別，附每 tick 成本估計與呼叫鏈"));
+    sec.appendChild(sectionHead("主要原因", "自身佔非 idle tick 採樣 ≥3% 的類別，附每 tick 成本估計與呼叫鏈"));
 
     var grid = el("div", "cause-grid");
     var shown = 0;
@@ -458,7 +459,7 @@
       var hero = el("div", "cause-hero");
       var heroNum = el("div", "cause-hero-num");
       heroNum.appendChild(el("b", null, F.fmtF(c.selfPct, 1) + "%"));
-      heroNum.appendChild(el("span", null, "self 佔非 idle tick"));
+      heroNum.appendChild(el("span", null, "自身佔非 idle tick"));
       hero.appendChild(heroNum);
       var heroBar = el("div", "cause-hero-bar");
       var track = el("div", "bar-track");
@@ -466,17 +467,17 @@
       fill.style.width = Math.min(100, c.selfPct) + "%";
       track.appendChild(fill);
       heroBar.appendChild(track);
-      heroBar.appendChild(el("div", "cause-hero-note", "inc/self " + F.fmtF(c.incRatio, 1) + (c.incRatio >= 1.5 ? " → 開銷來自被大量呼叫" : "")));
+      heroBar.appendChild(el("div", "cause-hero-note", "含子/自身 " + F.fmtF(c.incRatio, 1) + (c.incRatio >= 1.5 ? " → 開銷來自被大量呼叫" : "")));
       hero.appendChild(heroBar);
       card.appendChild(hero);
 
       var stats = el("div", "cause-stats");
       var s1 = el("div", "cause-stat");
-      s1.appendChild(el("div", "cause-stat-label", "self 佔比"));
+      s1.appendChild(el("div", "cause-stat-label", "自身佔比"));
       s1.appendChild(el("div", "cause-stat-value", F.fmtF(c.selfPct, 1) + "%"));
       stats.appendChild(s1);
       var s2 = el("div", "cause-stat");
-      s2.appendChild(el("div", "cause-stat-label", "inc/self 比"));
+      s2.appendChild(el("div", "cause-stat-label", "含子/自身 比"));
       s2.appendChild(el("div", "cause-stat-value", F.fmtF(c.incRatio, 1)));
       if (c.incRatio >= 1.5) s2.appendChild(el("div", "cause-stat-label", "≫1 → 開銷來自被大量呼叫"));
       stats.appendChild(s2);
@@ -485,7 +486,7 @@
       var evTd = el("div", "cause-stat-value", clsShort(c.evidence));
       evTd.title = c.evidence;
       s3.appendChild(evTd);
-      s3.appendChild(el("div", "cause-stat-label", "self 合計 " + F.fmtF(c.evidenceSelf, 0) + "ms"));
+      s3.appendChild(el("div", "cause-stat-label", "自身合計 " + F.fmtF(c.evidenceSelf, 0) + "ms"));
       stats.appendChild(s3);
       var s4 = el("div", "cause-stat");
       s4.appendChild(el("div", "cause-stat-label", "出現"));
@@ -503,7 +504,7 @@
         nodes.appendChild(nodeRow(tm[1], nDenom, parts[0], parts[1], parts[2], reportPluginOf(parts[0])));
       }
       if (topSrc.length) {
-        var note = el("div", "cause-nodes-note", "節點 % = 含子時間 ÷ 類別含子時間；含子時間因父子路徑重複計入，合計可能超過上方 self 佔比");
+        var note = el("div", "cause-nodes-note", "節點 % = 含子時間 ÷ 類別含子時間；含子時間因父子路徑重複計入，合計可能超過上方自身佔比");
         card.appendChild(note);
       }
       card.appendChild(nodes);
@@ -576,7 +577,7 @@
     var tr = el("tr");
     tr.appendChild(el("th", null, "#"));
     tr.appendChild(el("th", null, "插件"));
-    tr.appendChild(el("th", "num", "self 佔比"));
+    tr.appendChild(el("th", "num", "自身佔比"));
     tr.appendChild(el("th", "num", "成本"));
     tr.appendChild(el("th", null, "top 方法"));
     thead.appendChild(tr);
@@ -1372,7 +1373,7 @@
     var note = el("div", "note-list");
     note.style.margin = "12px 0 20px";
     var notes = [
-      "熱點以 self time 統計；已排除等待/idle、執行緒入口框架與 java.* 基礎框架",
+      "熱點以自身時間統計；已排除等待/idle、執行緒入口框架與 java.* 基礎框架",
       "百分比 = 佔總採樣，可與「已排除」表直接相加",
       "熱點後綴 :N = 該方法內的原始碼行號（來自 bytecode LineNumberTable）",
       "行尾 [插件] = 該類別歸屬於的插件（spark classSources 歸因）",
@@ -1422,14 +1423,15 @@
       var detail = el("div", "collapse-body");
       if (th.noData || th.noTime) {
         detail.appendChild(el("div", "thread-meta", th.noData ? "（無堆疊資料）" : "（無時間資料）"));
+        head.classList.add("open");
         detail.classList.add("open");
       } else {
         var two = el("div", "two-col");
         var left = el("div", null);
-        left.appendChild(tsec("熱點 top 20", hotTable(["self", "方法", "self ms"], th.workTop, th._grand, true), true));
+        left.appendChild(tsec("熱點 top 20", hotTable(["自身", "方法", "自身 ms"], th.workTop, th._grand, true), true));
         two.appendChild(left);
         var right = el("div", null);
-        right.appendChild(tsec("已排除（前 15，排除共 " + F.fmtF(th.exclTotalPct, 0) + "%，長尾 " + F.fmtF(th.exclTailPct, 1) + "% 未列）", hotTable(["self", "方法", "self ms"], th.exclTop, th._grand, false), true));
+        right.appendChild(tsec("已排除（前 15，排除共 " + F.fmtF(th.exclTotalPct, 0) + "%，長尾 " + F.fmtF(th.exclTailPct, 1) + "% 未列）", hotTable(["自身", "方法", "自身 ms"], th.exclTop, th._grand, false), true));
         two.appendChild(right);
         detail.appendChild(two);
 
@@ -1438,7 +1440,7 @@
           var table = el("table", "hot-table");
           var thead = el("thead");
           var tr = el("tr");
-          ["含子（self）", "方法", "含子 ms"].forEach(function (h, hi) {
+          ["含子（自身）", "方法", "含子 ms"].forEach(function (h, hi) {
             tr.appendChild(el("th", hi === 0 ? "pct" : (hi === 2 ? "num" : null), h));
           });
           thead.appendChild(tr);
@@ -1498,16 +1500,16 @@
     var agg = report.serverAgg;
     if (!agg) return null;
     var sec = el("div", "sub-block");
-    sec.appendChild(sectionHead("全伺服器彙總", "所有執行緒合併（self time）"));
+    sec.appendChild(sectionHead("全伺服器彙總", "所有執行緒合併（自身時間）"));
     sec.appendChild(el("div", "thread-meta", "總採樣 " + F.fmtF(agg.grand, 0) + "（等待/idle " + F.fmtF(agg.idlePct, 0) + "% 已排除）"));
-    sec.appendChild(tsec("熱點 top 20", hotTable(["self", "方法", "self ms"], agg.topAll, agg.grand, true), true));
-    sec.appendChild(tsec("已排除（前 15，排除共 " + F.fmtF(agg.exclTotalPct, 0) + "%，長尾 " + F.fmtF(agg.exclTailPct, 1) + "% 未列）", hotTable(["self", "方法", "self ms"], agg.exclTop, agg.grand, false), true));
+    sec.appendChild(tsec("熱點 top 20", hotTable(["自身", "方法", "自身 ms"], agg.topAll, agg.grand, true), true));
+    sec.appendChild(tsec("已排除（前 15，排除共 " + F.fmtF(agg.exclTotalPct, 0) + "%，長尾 " + F.fmtF(agg.exclTailPct, 1) + "% 未列）", hotTable(["自身", "方法", "自身 ms"], agg.exclTop, agg.grand, false), true));
     if (agg.incTop.length) {
       var incTbl = el("div", "table-wrap");
        var table = el("table", "hot-table");
       var thead = el("thead");
       var tr = el("tr");
-       ["含子（self）", "方法", "含子 ms"].forEach(function (h, hi) {
+       ["含子（自身）", "方法", "含子 ms"].forEach(function (h, hi) {
          tr.appendChild(el("th", hi === 0 ? "pct" : (hi === 2 ? "num" : null), h));
       });
       thead.appendChild(tr);
@@ -1542,7 +1544,7 @@
     var table = el("table");
     var thead = el("thead");
     var tr = el("tr");
-    tr.appendChild(el("th", "num", "self"));
+    tr.appendChild(el("th", "num", "自身"));
     tr.appendChild(el("th", null, "節點"));
     thead.appendChild(tr);
     table.appendChild(thead);

@@ -1549,14 +1549,14 @@
       add("ROOT CAUSE #" + shown + " — " + cause.label);
       add("=".repeat(60));
       var cost2 = cause.costMs !== null ? "約 +" + fmtF(cause.costMs, 1) + " ms/tick  " : "";
-      add("影響     : " + cost2 + "self " + fmtF(cause.selfPct, 1) + "%（整段採樣平均，非單次峰值）");
+      add("影響     : " + cost2 + "自身 " + fmtF(cause.selfPct, 1) + "%（整段採樣平均，非單次峰值）");
       if (cause.incRatio >= 1.5) {
-        add("結構     : 節點 inc/self 比 " + fmtF(cause.incRatio, 1) + "（≫1 → 自身運算少、開銷來自被大量呼叫）");
+        add("結構     : 節點 含子/自身 比 " + fmtF(cause.incRatio, 1) + "（≫1 → 自身運算少、開銷來自被大量呼叫）");
       } else {
-        add("結構     : 節點 inc/self 比 " + fmtF(cause.incRatio, 1) + "（自身運算為主）");
+        add("結構     : 節點 含子/自身 比 " + fmtF(cause.incRatio, 1) + "（自身運算為主）");
       }
       add("信心     : " + cause.confidence);
-      add("證據     : " + cause.evidence + "（類別內 self 合計 " + fmtF(cause.evidenceSelf, 0) + "ms）");
+      add("證據     : " + cause.evidence + "（類別內自身合計 " + fmtF(cause.evidenceSelf, 0) + "ms）");
       add("出現     : 跨 " + cause.threadCount + " 個執行緒");
       add("主要節點 :");
       for (var q2 = 0; q2 < cause.topMethods.length; q2++) {
@@ -1594,13 +1594,13 @@
             var restN2 = aiOwners.size - aiTop.length;
             var items2 = aiTop.map(function (en) { return en[0] + " " + fmtF(en[1], 0) + "ms"; }).join("、");
             if (restN2 > 0) items2 += "（…另 " + restN2 + " 個入口）";
-            add("  AI 開銷的實體入口（AI self 沿呼叫鏈往上歸因）: " + items2);
+            add("  AI 開銷的實體入口（AI 自身沿呼叫鏈往上歸因）: " + items2);
           }
         }
       }
       var ch = d.chains.get(cause.category);
       if (ch) {
-        add("Call Chain（self 最高的節點往上追，最內層路徑）:");
+        add("Call Chain（自身最高的節點往上追，最內層路徑）:");
         for (var ci2 = 0; ci2 < ch.length; ci2++) {
           var chain = ch[ci2][2];
           var shownChain = chain.slice(-5);
@@ -1610,7 +1610,7 @@
             var cpl = pluginOfCategory(report, cn[0]);
             var ctag = cpl ? " [" + cpl + "]" : "";
             var prefix = j2 ? "  └─ " : "  ";
-            var mark = j2 === shownChain.length - 1 ? "   ← self 最高" : "";
+            var mark = j2 === shownChain.length - 1 ? "   ← 自身最高" : "";
             add(prefix + cn[0] + "." + cn[1] + cloc + ctag + mark);
           }
         }
@@ -1849,7 +1849,7 @@
     var threads = report.threads;
     L.push("");
     L.push("=".repeat(60));
-    L.push("※ 以下熱點以 self time 統計；已排除等待/idle、執行緒入口框架與 java.* 基礎框架");
+    L.push("※ 以下熱點以自身時間統計；已排除等待/idle、執行緒入口框架與 java.* 基礎框架");
     L.push("  百分比 = 佔總採樣，可與「已排除」表直接相加");
     L.push("  熱點後綴 :N = 該方法內的原始碼行號（來自 bytecode LineNumberTable）");
     L.push("");
@@ -1904,7 +1904,7 @@
     var agg = report.serverAgg;
     if (!agg) return;
     L.push("=".repeat(60));
-    L.push("全伺服器彙總（所有執行緒合併，self time）");
+    L.push("全伺服器彙總（所有執行緒合併，自身時間）");
     L.push("※ 已排除等待/idle、執行緒入口框架與 java.* 基礎框架");
     L.push("  百分比 = 佔總採樣，可與「已排除」表直接相加");
     L.push("  熱點後綴 :N = 該方法內的原始碼行號（來自 bytecode LineNumberTable）");
