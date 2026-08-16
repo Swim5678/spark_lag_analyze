@@ -1734,11 +1734,19 @@
       var st = e.state;
       if (st && st.url && reportCache[st.url]) {
         var rid = st.url.replace("?id=", "");
+        if (inputEl.value !== rid) inputEl.value = rid;
         document.title = "spark 分析器 — " + rid;
         renderReport(reportCache[st.url]);
       } else {
+        var qid = SparkData.idFromQuery();
+        if (qid) {
+          if (inputEl.value !== qid) inputEl.value = qid;
+          document.title = "spark 分析器 — " + qid;
+        } else {
+          if (inputEl.value !== "") inputEl.value = "";
+          document.title = "spark 分析器";
+        }
         currentReport = null;
-        document.title = "spark 分析器";
         resultsEl.innerHTML = "";
         resultsEl.appendChild(emptyStateEl);
       }
