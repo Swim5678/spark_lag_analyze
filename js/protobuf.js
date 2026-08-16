@@ -232,34 +232,20 @@
   // bytes → 字串（快取）
   // ----------------------------------------------------------------------
 
-  /* 以內容 FNV-1a 雜湊為鍵的快取，取代 Python 版的 bytes 值快取：
-   * 同一份 profile 中同一字串反覆出現（類別/方法名），只 decode 一次。
-   * 兩條 32-bit FNV 通道合成 64-bit，同長度同雜湊的碰撞機率可忽略。 */
+  /* 以解碼結果字串本身為鍵的快取：同一份 profile 中同一字串反覆出現
+   * （類別/方法名），只需 decode 一次；省去 FNV-1a 逐位元組雜湊計算。 */
   var _ST_CACHE = new Map();
   var _TD = typeof TextDecoder !== "undefined" ? new TextDecoder("utf-8") : null;
-
-  function _fnv(v) {
-    var h1 = 0x811c9dc5;
-    var h2 = 0xdeadbeef;
-    for (var i = 0; i < v.length; i++) {
-      var b = v[i];
-      h1 = (h1 ^ b) * 0x01000193 >>> 0;
-      h2 = (h2 ^ b) * 0x85ebca6b >>> 0;
-    }
-    return h1.toString(36) + ":" + h2.toString(36);
-  }
 
   function st(v) {
     /* Uint8Array → UTF-8 字串（容錯，帶快取）；非 bytes → null。 */
     if (typeof v === "string") return v;
     if (!(v instanceof Uint8Array)) return null;
     if (!_TD) return null;
-    var h = _fnv(v);
-    var hit = _ST_CACHE.get(h);
-    if (hit && hit.len === v.length) return hit.s;
-    if (_ST_CACHE.size > 100000) _ST_CACHE.clear();
     var s = _TD.decode(v);
-    _ST_CACHE.set(h, { len: v.length, s: s });
+    if (_ST_CACHE.has(s)) return s;
+    if (_ST_CACHE.size > 100000) _ST_CACHE.clear();
+    _ST_CACHE.set(s, s);
     return s;
   }
 

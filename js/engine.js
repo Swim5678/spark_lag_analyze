@@ -73,6 +73,26 @@
     "net.minecraft.server.MinecraftServer\u0000recordTaskExecutionTimeWhileWaiting",
   ]);
 
+  /* 等待配對的兩層索引（cls → 方法集合）：collectThreads 每節點查詢時
+   * 省去 "cls\0mth" 字串拼接。 */
+  var WAIT_IDLE_BY_CLS = new Map();
+  for (var _wip of WAIT_IDLE_PAIRS) {
+    var _sep = _wip.indexOf("\u0000");
+    var _wc = _wip.slice(0, _sep);
+    var _wm = _wip.slice(_sep + 1);
+    var _ws = WAIT_IDLE_BY_CLS.get(_wc);
+    if (!_ws) {
+      _ws = new Set();
+      WAIT_IDLE_BY_CLS.set(_wc, _ws);
+    }
+    _ws.add(_wm);
+  }
+
+  function isWaitIdle(cls, mth) {
+    var ws = WAIT_IDLE_BY_CLS.get(cls);
+    return ws ? ws.has(mth) : false;
+  }
+
   var ENTITY_BASE_CLASSES = new Set([
     "Entity", "LivingEntity", "Mob", "PathfinderMob", "Monster", "Animal",
     "AgeableMob", "NeutralMob", "WaterAnimal", "AmbientCreature", "FlyingMob",
@@ -293,19 +313,36 @@
   function makeCategorizer(sources) {
     var plugCache = new Map();
     var catCache = new Map();
+    // 前綴索引：索引鍵 = 來源類別 c 本身（sources 原始鍵），查詢時對 cls
+    // 切出本身與所有「$」前綴逐一查表（最長來源類別優先，先建者同長度優先），
+    // 取代逐條掃描 sources。
+    var prefixIndex = new Map();
+    for (var spair of sources.entries()) {
+      var c0 = spair[0];
+      var p0 = spair[1];
+      var sold = prefixIndex.get(c0);
+      if (!sold || sold.len < c0.length) prefixIndex.set(c0, { p: p0, len: c0.length });
+    }
 
     function pluginOf(cls) {
       if (plugCache.has(cls)) return plugCache.get(cls);
       var best = null;
       var blen = 0;
-      for (var pair of sources.entries()) {
-        var c = pair[0];
-        var p = pair[1];
-        if (cls === c || cls.indexOf(c + "$") === 0) {
-          if (c.length > blen) {
-            best = p;
-            blen = c.length;
-          }
+      var pos = 0;
+      while (true) {
+        var pre = pos === 0 ? cls : cls.slice(0, pos);
+        var hit = prefixIndex.get(pre);
+        if (hit && hit.len > blen) {
+          best = hit.p;
+          blen = hit.len;
+        }
+        if (pos === 0) {
+          pos = cls.indexOf("$");
+          if (pos === -1) break;
+        } else {
+          var npos = cls.indexOf("$", pos + 1);
+          if (npos === -1) break;
+          pos = npos;
         }
       }
       plugCache.set(cls, best);
@@ -361,10 +398,19 @@
     return cls + "\u0000" + mth + "\u0000" + line;
   }
 
+  /* 快取 (cls, mth, line) 分割結果：同鍵反覆分割（熱點統計、執行緒彙總、
+   * 診斷掃描共用）。上限 20 萬筆，超過直接清空重來（退化等同未快取）。 */
+  var _splitCache = new Map();
+
   function splitKey(k) {
+    var hit = _splitCache.get(k);
+    if (hit) return hit;
+    if (_splitCache.size > 200000) _splitCache.clear();
     var i = k.indexOf("\u0000");
     var j = k.lastIndexOf("\u0000");
-    return [k.slice(0, i), k.slice(i + 1, j), Number(k.slice(j + 1))];
+    var parts = [k.slice(0, i), k.slice(i + 1, j), Number(k.slice(j + 1))];
+    _splitCache.set(k, parts);
+    return parts;
   }
 
   // ----------------------------------------------------------------------
@@ -400,7 +446,7 @@
       var idle = 0;
       var waitIdx = [];
       for (j = 0; j < nodes.length; j++) {
-        if (WAIT_IDLE_PAIRS.has(nodes[j][0] + "\u0000" + nodes[j][1])) waitIdx.push(j);
+        if (isWaitIdle(nodes[j][0], nodes[j][1])) waitIdx.push(j);
       }
       var maxDepth = nodes.length;
       for (j = 0; j < waitIdx.length; j++) {
@@ -409,7 +455,7 @@
         var covered = false;
         var depth = 0;
         while (p >= 0 && depth < maxDepth) {
-          if (WAIT_IDLE_PAIRS.has(nodes[p][0] + "\u0000" + nodes[p][1])) {
+          if (isWaitIdle(nodes[p][0], nodes[p][1])) {
             covered = true;
             break;
           }
@@ -797,8 +843,8 @@
     return causes;
   }
 
-  function findChains(threads, categorize, cat, limit) {
-    var best = new Map();
+  function findChainIndex(threads, categorize) {
+    var index = new Map();
     for (var ti = 0; ti < threads.length; ti++) {
       var t = threads[ti];
       for (var ni = 0; ni < t.nodes.length; ni++) {
@@ -809,13 +855,22 @@
         var stv = node[3];
         if (isNoise(cls, mth)) continue;
         var catRes = categorize(cls, mth);
-        if (catRes[0] !== cat) continue;
+        var best = index.get(catRes[0]);
+        if (!best) {
+          best = new Map();
+          index.set(catRes[0], best);
+        }
         var k = keyOf(cls, mth, line);
         var cur = best.get(k);
         if (cur === undefined || stv > cur[2]) best.set(k, [ti, ni, stv]);
       }
     }
+    return index;
+  }
+
+  function chainsFromIndex(best, threads, limit) {
     var chains = [];
+    if (!best) return chains;
     for (var bp of best.entries()) {
       var key = bp[0];
       var ti2 = bp[1][0];
@@ -836,6 +891,10 @@
     }
     chains.sort(function (a, b) { return b[0] - a[0]; });
     return chains.slice(0, limit);
+  }
+
+  function findChains(threads, categorize, cat, limit) {
+    return chainsFromIndex(findChainIndex(threads, categorize).get(cat), threads, limit);
   }
 
   function regionRanking(threads, durMs, factor) {
@@ -1005,10 +1064,11 @@
       var catTick = aggregateByCategory(tickThreads, categorize);
       var causes = rankCauses(catTick, tickActive, factor, overrun);
       var chains = new Map();
+      var chainIndex = findChainIndex(tickThreads, categorize);
       for (var ci = 0; ci < causes.length; ci++) {
         var cc = causes[ci];
         if (cc.selfPct >= 3) {
-          chains.set(cc.category, findChains(tickThreads, categorize, cc.category, 3));
+          chains.set(cc.category, chainsFromIndex(chainIndex.get(cc.category), tickThreads, 3));
         }
       }
       var plugins = aggregateByPlugin(tickThreads, categorize);
@@ -1238,19 +1298,12 @@
       d.busyPct = busy;
       d._grand = grand;
       var hasPool = /\(x\d+\)/.test(t.name);
-      var top = [];
-      var sortedWork = [];
-      for (var e of t.work.entries()) sortedWork.push(e);
-      sortedWork.sort(function (a, b) { return b[1] - a[1]; });
-      for (var q = 0; q < sortedWork.length && q < 20; q++) top.push(sortedWork[q]);
+      var top = mostCommon(t.work, 20);
       d.workTop = top.map(function (en) {
         var parts = splitKey(en[0]);
         return [parts[0], parts[1], parts[2], en[1], pluginOf(parts[0])];
       });
-      var exclSorted = [];
-      for (var exEn of t.excluded.entries()) exclSorted.push(exEn);
-      exclSorted.sort(function (a, b) { return b[1] - a[1]; });
-      var exclTop = exclSorted.slice(0, 15);
+      var exclTop = mostCommon(t.excluded, 15);
       var exclTotal = 0;
       for (var v2 of t.excluded.values()) exclTotal += v2;
       var shown = 0;
@@ -1312,18 +1365,11 @@
     var workSum = 0;
     for (var v of workAll.values()) workSum += v;
     idleAll = grandAll - workSum;
-    var topAll = [];
-    var sortedAll = [];
-    for (var se of workAll.entries()) sortedAll.push(se);
-    sortedAll.sort(function (a, b) { return b[1] - a[1]; });
-    topAll = sortedAll.slice(0, 25).map(function (en) {
+    var topAll = mostCommon(workAll, 25).map(function (en) {
       var parts = splitKey(en[0]);
       return [parts[0], parts[1], parts[2], en[1], pluginOf(parts[0])];
     });
-    var exclAllSorted = [];
-    for (var ee of excludedAll.entries()) exclAllSorted.push(ee);
-    exclAllSorted.sort(function (a, b) { return b[1] - a[1]; });
-    var exclAllTop = exclAllSorted.slice(0, 15).map(function (en) {
+    var exclAllTop = mostCommon(excludedAll, 15).map(function (en) {
       var parts = splitKey(en[0]);
       return [parts[0], parts[1], parts[2], en[1]];
     });
