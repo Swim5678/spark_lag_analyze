@@ -327,7 +327,7 @@
       var specTop = [];
       for (var se2 of specific.entries()) specTop.push(se2);
       specTop.sort(function (a, b) { return b[1] - a[1]; });
-      groups.push({ label: "實體類別自身 self", rows: specTop });
+      groups.push({ label: "實體自身開銷", rows: specTop });
     }
     if (aiOwners.size) {
       var aiTop = [];

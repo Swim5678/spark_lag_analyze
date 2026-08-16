@@ -1587,7 +1587,7 @@
             var restN = specific.size - specTop.length;
             var items = specTop.map(function (en) { return en[0] + " " + fmtF(en[1], 0) + "ms"; }).join("、");
             if (restN > 0) items += "（…另 " + restN + " 個）";
-            add("  實體類別自身 self: " + items);
+            add("  實體自身開銷: " + items);
           }
           if (aiOwners.size) {
             var aiTop = mostCommon(aiOwners, 5);
